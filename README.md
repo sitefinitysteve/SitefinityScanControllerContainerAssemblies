@@ -89,6 +89,23 @@ version, so prefer the package if you can.
 
 </details>
 
+### The exe lands in your Build folder
+
+The package copies the executable (and a short README explaining what it is) into your
+project's `Build\` folder on each build, so it sits beside the script it replaces and
+stays in step with the installed package version.
+
+`Build\` is usually under source control, so add these to `.gitignore` — both are
+recreated by any build that restores packages:
+
+```
+Build/SitefinitySteveScanControllerAssemblies.exe
+Build/SitefinitySteveScanControllerAssemblies.README.md
+```
+
+To put nothing in your tree at all and run straight from the package folder, set
+`<SitefinitySteveScanCopyToBuildFolder>false</SitefinitySteveScanCopyToBuildFolder>`.
+
 ### Did it work?
 
 Build, and look at the Output window (or build log) for a line like this:

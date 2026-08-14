@@ -43,6 +43,30 @@ ECMA-335 metadata directly and never loads an assembly.
 Measured on a real 269-DLL Sitefinity site: ~5,000 ms → ~40 ms — **99.2% faster, about
 125x**, saving roughly 5 seconds on every single build.
 
+**About that 40 ms:** it's the steady-state figure, with `bin` already in the OS file
+cache. The first build after a full rebuild can take ~2 seconds instead, because several
+hundred MB of freshly written assemblies have to be read back off disk. That's disk I/O,
+not scanner work — and the PowerShell scan pays the same cost *plus* assembly loading, so
+the gap widens on a cold cache rather than narrowing. Don't be alarmed if your very first
+measurement looks slower than expected.
+
+## Where the executable goes
+
+The package copies `SitefinitySteveScanControllerAssemblies.exe` (and a short README
+explaining what it is) into your project's `Build\` folder on each build, so it sits
+beside the script it replaces and stays in step with the installed package version.
+
+`Build\` is usually under source control, so add these to `.gitignore` — both are
+recreated by any build that restores packages:
+
+```
+Build/SitefinitySteveScanControllerAssemblies.exe
+Build/SitefinitySteveScanControllerAssemblies.README.md
+```
+
+To run straight from the package folder instead and put nothing in your tree, set
+`<SitefinitySteveScanCopyToBuildFolder>false</SitefinitySteveScanCopyToBuildFolder>`.
+
 ## Options
 
 Only if you need them:

@@ -68,26 +68,37 @@
           SkipUnchangedFiles="true"
           Condition="'$(SitefinitySteveScanCopyToBuildFolder)' == 'true' AND Exists('$(SitefinitySteveScanPackagedReadme)')" />
 
+    <!-- Capture the exit code. A crashing exe (AV quarantine, locked bin, unreadable
+         file) must fall back exactly like a missing one - otherwise ContinueOnError
+         swallows the failure and the build finishes with no JSON at all. -->
     <Exec Command="&quot;$(SitefinitySteveScanExe)&quot; &quot;$(SitefinitySteveScanBinDir)&quot;"
           Condition="Exists('$(SitefinitySteveScanExe)')"
           ContinueOnError="WarnAndContinue"
           StandardOutputImportance="high"
-          StandardErrorImportance="high" />
+          StandardErrorImportance="high">
+      <Output TaskParameter="ExitCode" PropertyName="SitefinitySteveScanExitCode" />
+    </Exec>
 
-    <!-- Executable missing (partial checkout, packages not restored, wrong platform).
-         Rather than skip the scan, fall back to Feather's own PowerShell script so a
-         build never ships without the JSON. $(ScanControllerContainerAssembliesScript)
-         is defined by Feather's targets, which this file is imported after. -->
-    <Warning Condition="!Exists('$(SitefinitySteveScanExe)') AND Exists('$(ScanControllerContainerAssembliesScript)')"
-             Text="SitefinitySteveScanControllerAssemblies.exe not found at '$(SitefinitySteveScanExe)' - falling back to Sitefinity's PowerShell scan for this build. Restore NuGet packages to get the fast scan back. See https://www.sitefinitysteve.com/" />
+    <PropertyGroup>
+      <!-- True when the scan did not succeed, for EITHER reason: the exe was absent
+           (Exec skipped, so the property is empty) or it ran and failed (non-zero). -->
+      <SitefinitySteveScanFailed Condition="'$(SitefinitySteveScanExitCode)' != '0'">true</SitefinitySteveScanFailed>
+      <SitefinitySteveScanFailed Condition="'$(SitefinitySteveScanFailed)' == ''">false</SitefinitySteveScanFailed>
+    </PropertyGroup>
+
+    <!-- Fall back to Feather's own PowerShell script so a build never ships without
+         the JSON. $(ScanControllerContainerAssembliesScript) is defined by Feather's
+         targets, which this file is imported after. -->
+    <Warning Condition="'$(SitefinitySteveScanFailed)' == 'true' AND Exists('$(ScanControllerContainerAssembliesScript)')"
+             Text="The fast controller-container scan did not complete (exe '$(SitefinitySteveScanExe)', exit code '$(SitefinitySteveScanExitCode)') - falling back to Sitefinity's PowerShell scan for this build. See https://www.sitefinitysteve.com/" />
 
     <Exec Command="powershell.exe -NonInteractive -ExecutionPolicy Unrestricted -command &quot;. '$(ScanControllerContainerAssembliesScript)' -binariesDirectory '$(SitefinitySteveScanBinDir)'&quot;"
-          Condition="!Exists('$(SitefinitySteveScanExe)') AND Exists('$(ScanControllerContainerAssembliesScript)')"
+          Condition="'$(SitefinitySteveScanFailed)' == 'true' AND Exists('$(ScanControllerContainerAssembliesScript)')"
           ContinueOnError="WarnAndContinue" />
 
     <!-- Neither available: say so loudly rather than silently producing nothing. -->
-    <Warning Condition="!Exists('$(SitefinitySteveScanExe)') AND !Exists('$(ScanControllerContainerAssembliesScript)')"
-             Text="Neither SitefinitySteveScanControllerAssemblies.exe ('$(SitefinitySteveScanExe)') nor Sitefinity's fallback script was found. The controller-container JSON was not regenerated; Sitefinity will scan at startup instead. Restore NuGet packages. See https://www.sitefinitysteve.com/" />
+    <Warning Condition="'$(SitefinitySteveScanFailed)' == 'true' AND !Exists('$(ScanControllerContainerAssembliesScript)')"
+             Text="The controller-container scan did not complete (exe '$(SitefinitySteveScanExe)', exit code '$(SitefinitySteveScanExitCode)') and Sitefinity's fallback script was not found. The JSON was not regenerated; Sitefinity will scan at startup instead. See https://www.sitefinitysteve.com/" />
   </Target>
 
 </Project>
