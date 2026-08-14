@@ -36,7 +36,7 @@ jobs:
     environment: nuget-publish
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: ver
@@ -79,7 +79,7 @@ jobs:
           cp target/x86_64-pc-windows-msvc/release/SitefinitySteveScanControllerAssemblies.exe \
              packaging/tools/
 
-      - uses: NuGet/setup-nuget@v2
+      - uses: NuGet/setup-nuget@v4
 
       - name: Pack
         shell: bash
@@ -143,7 +143,7 @@ jobs:
 
       - name: Create GitHub release
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             target/x86_64-pc-windows-msvc/release/SitefinitySteveScanControllerAssemblies.exe
@@ -151,7 +151,7 @@ jobs:
           generate_release_notes: true
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nupkg-${{ steps.ver.outputs.version }}
           path: artifacts/*.nupkg
