@@ -1,0 +1,21 @@
+[package]
+name = "sitefinity-scan-controller-assemblies"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Fast scanner for Sitefinity Feather controller-container assemblies"
+license = "MIT"
+repository = "https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies"
+
+[[bin]]
+name = "SitefinitySteveScanControllerAssemblies"
+path = "src/main.rs"
+
+# Zero external dependencies on purpose: this ships inside a NuGet package that
+# lands on other people's build agents. No supply chain, no version churn.
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
