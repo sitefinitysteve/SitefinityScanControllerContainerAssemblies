@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Build
+        run: cargo build --release
+
+      # Unit tests plus end-to-end tests against the small pre-built .NET
+      # assemblies in test/fixtures/prebuilt. No .NET SDK needed.
+      - name: Test
+        run: cargo test --release
+
+      - name: Clippy
+        run: |
+          rustup component add clippy
+          cargo clippy --release --all-targets -- -D warnings
+
+      # Not expressible as a Rust test: this needs MSBuild to confirm our target
+      # definition actually beats Feather's when imported after it.
+      - name: Verify MSBuild override beats Feather's target
+        shell: bash
+        run: |
+          cat > FakeFeather.targets <<'EOF'
+          <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+            <Target Name="ScanControllerContainerAssemblies" AfterTargets="AfterBuild">
+              <Message Importance="high" Text="VENDOR_SCAN_RAN" />
+            </Target>
+          </Project>
+          EOF
+          cat > override.proj <<'EOF'
+          <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+            <Target Name="Build" />
+            <Target Name="AfterBuild" AfterTargets="Build" />
+            <Import Project="FakeFeather.targets" />
+            <Import Project="packaging/build/SitefinityAssemblyScanner.targets" />
+          </Project>
+          EOF
+          OUT=$(dotnet msbuild override.proj -nologo -v:m \
+            "-p:SitefinitySteveScanExe=$PWD/target/release/SitefinitySteveScanControllerAssemblies.exe" \
+            "-p:SitefinitySteveScanBinDir=$PWD/test/fixtures/prebuilt")
+          echo "$OUT"
+          if echo "$OUT" | grep -q VENDOR_SCAN_RAN; then
+            echo "::error::Feather's slow target won; the override did not take effect"
+            exit 1
+          fi
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: SitefinitySteveScanControllerAssemblies
+          path: target/release/SitefinitySteveScanControllerAssemblies.exe

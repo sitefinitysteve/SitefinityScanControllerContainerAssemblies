@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>SitefinityAssemblyScanner</id>
+    <version>$version$</version>
+    <title>Sitefinity Assembly Scanner</title>
+    <authors>Steve McNiven-Scott (sitefinitysteve)</authors>
+    <owners>Steve McNiven-Scott (sitefinitysteve)</owners>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies</projectUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>
+      Drop-in replacement for Sitefinity Feather's ScanControllerContainerAssemblies.ps1
+      build step. The stock script calls Assembly.LoadFrom on every DLL in the bin folder
+      just to read two assembly-level attributes, costing roughly 5 seconds per build.
+      This tool reads the CLI metadata directly instead and produces a byte-identical
+      ControllerContainerAsembliesLocation.json in tens of milliseconds.
+
+      Installing this package overrides the Feather build target automatically. No
+      PowerShell, no .NET runtime dependency - a single self-contained native executable.
+
+      By Steve McNiven-Scott - https://www.sitefinitysteve.com/
+    </description>
+    <summary>Replaces Feather's ~5s PowerShell controller-container scan with a ~40ms native executable - 99% faster, byte-identical output.</summary>
+    <releaseNotes>See https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies/releases</releaseNotes>
+    <tags>sitefinity feather msbuild build-performance controller-container telerik</tags>
+    <!-- Build-time tool only: must not flow to consumers of the host project. -->
+    <developmentDependency>true</developmentDependency>
+  </metadata>
+  <files>
+    <!-- NuGet auto-imports build\<PackageId>.targets into the consuming project. -->
+    <file src="build\SitefinityAssemblyScanner.targets" target="build\SitefinityAssemblyScanner.targets" />
+    <!-- Populated by CI from the release build before packing. -->
+    <file src="tools\SitefinitySteveScanControllerAssemblies.exe" target="tools\SitefinitySteveScanControllerAssemblies.exe" />
+    <!-- Staged into the site's Build folder beside the exe, so anyone who finds it
+         there can tell what it is and where it came from. -->
+    <file src="BUILD_FOLDER_README.md" target="tools\SitefinitySteveScanControllerAssemblies.README.md" />
+    <file src="..\LICENSE" target="LICENSE" />
+    <file src="PACKAGE.md" target="README.md" />
+  </files>
+</package>

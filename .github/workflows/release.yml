@@ -1,0 +1,91 @@
+name: Release
+
+# Fires only on a version tag. NuGet pushes are PERMANENT - a version can be
+# unlisted but never deleted or overwritten - so this must never run on every
+# push to main.
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    # Add required reviewers to this environment in repo Settings -> Environments
+    # if you want a human approval gate before anything reaches nuget.org.
+    environment: nuget-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: ver
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "tag=$VERSION cargo=$CARGO_VERSION"
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag v$VERSION does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      # windows-latest ships the MSVC toolchain, so the published binary is the
+      # conventional x86_64-pc-windows-msvc build regardless of what was used
+      # for local development.
+      - name: Build (x86_64-pc-windows-msvc)
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+          cargo build --release --target x86_64-pc-windows-msvc
+
+      # Refuse to publish anything that does not pass the full suite.
+      - name: Test
+        run: cargo test --release --target x86_64-pc-windows-msvc
+
+      - name: Stage binary for packing
+        shell: bash
+        run: |
+          mkdir -p packaging/tools
+          cp target/x86_64-pc-windows-msvc/release/SitefinitySteveScanControllerAssemblies.exe \
+             packaging/tools/
+
+      - uses: NuGet/setup-nuget@v2
+
+      - name: Pack
+        shell: bash
+        run: |
+          nuget pack packaging/SitefinityAssemblyScanner.nuspec \
+            -Version "${{ steps.ver.outputs.version }}" \
+            -OutputDirectory artifacts
+          ls artifacts
+
+      - name: Push to nuget.org
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY secret is not set. Add it in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          dotnet nuget push artifacts/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/x86_64-pc-windows-msvc/release/SitefinitySteveScanControllerAssemblies.exe
+            artifacts/*.nupkg
+          generate_release_notes: true

@@ -1,7 +1,11 @@
+<a href="https://www.sitefinitysteve.com/">
+  <img src="sfslogo.png" alt="SitefinitySteve" width="420">
+</a>
+
 # SitefinitySteveScanControllerAssemblies
 
 A drop-in replacement for Sitefinity Feather's `ScanControllerContainerAssemblies.ps1`
-build step. Byte-identical output, roughly **100x faster**.
+build step. Byte-identical output, **99% faster** (roughly 125x).
 
 One self-contained native executable. No PowerShell, no .NET runtime, nothing to install
 on the build agent.
@@ -50,6 +54,10 @@ Measured on a production Sitefinity bin folder, 269 DLLs, 311 MB:
 |---|---|
 | Stock `ScanControllerContainerAssemblies.ps1` | ~5,000 ms |
 | This tool | **~40 ms** |
+| **Improvement** | **99.2% faster — about 125× — saving ~4.96 s per build** |
+
+If you build 20 times a day that is around **100 seconds a day**, or roughly **7 hours a
+year**, per developer.
 
 Both with the bin folder already in the OS file cache, which is the real build case —
 MSBuild wrote those assemblies seconds earlier, so they're still in RAM. Scanning a
@@ -179,6 +187,12 @@ into a spurious diff.
 ## Who made this
 
 **Steve McNiven-Scott** — **[sitefinitysteve.com](https://www.sitefinitysteve.com/)**
+
+If this saved you some build time:
+
+<a href="https://www.buymeacoffee.com/stevewgw" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="60" width="217">
+</a>
 
 Found a bug or have a site where the output doesn't match?
 [Open an issue](https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies/issues).

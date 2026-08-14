@@ -1,0 +1,39 @@
+# --- Credentials: never commit -------------------------------------------
+# The NuGet API key belongs in GitHub Secrets (NUGET_API_KEY), never in a file.
+# `dotnet nuget add source -p` and `nuget setapikey` both write PLAINTEXT
+# credentials into NuGet.config, so that file is ignored on purpose. If you
+# ever need a credential-free NuGet.config committed, add it with:
+#     git add -f NuGet.config
+# after confirming it contains no <packageSourceCredentials> or apikeys.
+NuGet.config
+nuget.config
+*.apikey
+*.snk
+*.pfx
+*.p12
+.env
+.env.*
+secrets.json
+appsettings.Secrets.json
+
+# --- Build output ---------------------------------------------------------
+/target/
+packaging/**/*.nupkg
+
+# --- Local test corpus ----------------------------------------------------
+# A real Sitefinity bin folder (~485 MB). Never commit.
+test/bin/
+test/fixtures/**/bin/
+!test/fixtures/prebuilt/
+test/fixtures/**/obj/
+
+# Output the scanner produces while testing. The MASTER file it is compared
+# against is deliberately NOT ignored.
+**/ControllerContainerAsembliesLocation.json
+
+# --- Editor / OS noise ----------------------------------------------------
+.vs/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

@@ -1,0 +1,46 @@
+#!/bin/sh
+# Pre-commit hook: rebuild the release binary and stage it into packaging/tools/
+# so a ready-to-pack executable is always present in the repository.
+#
+# Enable it once per clone with:
+#     git config core.hooksPath .githooks
+#
+# Deliberately non-blocking. If Rust is not installed (the toolchain is only
+# needed for development and is often removed afterwards), this warns and lets
+# the commit through rather than making the repo un-committable.
+
+set -e
+
+EXE_NAME="SitefinitySteveScanControllerAssemblies.exe"
+SRC="target/release/$EXE_NAME"
+DEST="packaging/tools/$EXE_NAME"
+
+# Only do anything when Rust sources actually changed. Editing a markdown file
+# should not trigger a release build.
+if ! git diff --cached --name-only | grep -qE '^(src/|Cargo\.(toml|lock)$)'; then
+  exit 0
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "pre-commit: cargo not found, skipping binary refresh." >&2
+  echo "pre-commit: packaging/tools/$EXE_NAME may now be older than src/." >&2
+  echo "pre-commit: CI rebuilds from source at release time, so this is not fatal." >&2
+  exit 0
+fi
+
+echo "pre-commit: rust sources changed, rebuilding $EXE_NAME..."
+if ! cargo build --release --quiet; then
+  echo "pre-commit: build FAILED - commit aborted." >&2
+  exit 1
+fi
+
+# A binary that does not pass its own tests should not be committed.
+if ! cargo test --release --quiet; then
+  echo "pre-commit: tests FAILED - commit aborted." >&2
+  exit 1
+fi
+
+mkdir -p packaging/tools
+cp -f "$SRC" "$DEST"
+git add "$DEST"
+echo "pre-commit: staged $DEST"

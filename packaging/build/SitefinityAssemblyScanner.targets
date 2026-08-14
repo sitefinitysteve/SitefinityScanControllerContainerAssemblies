@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Replaces Feather's controller-container scan with a native executable.
+
+  By Steve McNiven-Scott — https://www.sitefinitysteve.com/
+  https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies
+
+  HOW THE OVERRIDE WORKS
+  Telerik.Sitefinity.Feather.targets defines:
+
+      <Target Name="ScanControllerContainerAssemblies" AfterTargets="AfterBuild">
+        <Exec Command="powershell.exe ... ScanControllerContainerAssemblies.ps1 ..." />
+      </Target>
+
+  In MSBuild, when two targets share a name the LAST one evaluated wins. NuGet places
+  package imports at the end of the project file, after Feather's own import, so this
+  file is evaluated later and its definition replaces Feather's. No .ps1 is edited and
+  no vendor package is patched.
+
+  FAILURE MODES ARE ALL SAFE
+  - Imported before Feather's targets: Feather's slower definition wins, the build still
+    produces correct JSON, just at the original speed.
+  - Executable missing (packages not restored): a warning, never an error. In practice a
+    Sitefinity csproj already hard-errors via EnsureNuGetPackageBuildImports when
+    packages\ is missing, so this cannot be reached without the build having already
+    failed for that reason.
+  - Scanner itself fails: ContinueOnError, because a missing JSON only costs a slower
+    application start whereas a failed build costs everyone's time.
+
+  Check which implementation ran by looking for the scanner's summary line in the log.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <!-- Shipped inside this package. -->
+    <SitefinitySteveScanPackagedExe>$(MSBuildThisFileDirectory)..\tools\SitefinitySteveScanControllerAssemblies.exe</SitefinitySteveScanPackagedExe>
+    <SitefinitySteveScanPackagedReadme>$(MSBuildThisFileDirectory)..\tools\SitefinitySteveScanControllerAssemblies.README.md</SitefinitySteveScanPackagedReadme>
+
+    <!-- Stage the tool into the site's Build folder, beside the .ps1 it replaces, so it
+         is visible and can be run by hand. The copy happens on every build rather than
+         once at install time, so upgrading the package refreshes it automatically. -->
+    <SitefinitySteveScanCopyToBuildFolder Condition="'$(SitefinitySteveScanCopyToBuildFolder)' == ''">true</SitefinitySteveScanCopyToBuildFolder>
+    <SitefinitySteveScanBuildFolder Condition="'$(SitefinitySteveScanBuildFolder)' == ''">$(MSBuildProjectDirectory)\Build</SitefinitySteveScanBuildFolder>
+
+    <!-- Run the staged copy when staging is on, otherwise straight from the package. -->
+    <SitefinitySteveScanExe Condition="'$(SitefinitySteveScanExe)' == '' AND '$(SitefinitySteveScanCopyToBuildFolder)' == 'true'">$(SitefinitySteveScanBuildFolder)\SitefinitySteveScanControllerAssemblies.exe</SitefinitySteveScanExe>
+    <SitefinitySteveScanExe Condition="'$(SitefinitySteveScanExe)' == ''">$(SitefinitySteveScanPackagedExe)</SitefinitySteveScanExe>
+
+    <SitefinitySteveScanBinDir Condition="'$(SitefinitySteveScanBinDir)' == ''">$(MSBuildProjectDirectory)\bin</SitefinitySteveScanBinDir>
+    <!-- Set to false to fall back to Feather's original PowerShell scan. -->
+    <SitefinitySteveScanEnabled Condition="'$(SitefinitySteveScanEnabled)' == ''">true</SitefinitySteveScanEnabled>
+  </PropertyGroup>
+
+  <Target Name="ScanControllerContainerAssemblies"
+          AfterTargets="AfterBuild"
+          Condition="'$(SitefinitySteveScanEnabled)' == 'true'">
+
+    <!-- SkipUnchangedFiles compares timestamp and size, so this is a no-op on every
+         build except the one straight after a package install or upgrade. -->
+    <Copy SourceFiles="$(SitefinitySteveScanPackagedExe)"
+          DestinationFolder="$(SitefinitySteveScanBuildFolder)"
+          SkipUnchangedFiles="true"
+          Condition="'$(SitefinitySteveScanCopyToBuildFolder)' == 'true' AND Exists('$(SitefinitySteveScanPackagedExe)')" />
+
+    <!-- Tells anyone who finds the exe what it is and where it came from. -->
+    <Copy SourceFiles="$(SitefinitySteveScanPackagedReadme)"
+          DestinationFolder="$(SitefinitySteveScanBuildFolder)"
+          SkipUnchangedFiles="true"
+          Condition="'$(SitefinitySteveScanCopyToBuildFolder)' == 'true' AND Exists('$(SitefinitySteveScanPackagedReadme)')" />
+
+    <Exec Command="&quot;$(SitefinitySteveScanExe)&quot; &quot;$(SitefinitySteveScanBinDir)&quot;"
+          Condition="Exists('$(SitefinitySteveScanExe)')"
+          ContinueOnError="WarnAndContinue"
+          StandardOutputImportance="high"
+          StandardErrorImportance="high" />
+
+    <Warning Condition="!Exists('$(SitefinitySteveScanExe)')"
+             Text="SitefinitySteveScanControllerAssemblies.exe not found at '$(SitefinitySteveScanExe)'. The controller-container JSON was not regenerated; Sitefinity will fall back to scanning at startup. If this persists, restore NuGet packages. See https://www.sitefinitysteve.com/" />
+  </Target>
+
+</Project>
