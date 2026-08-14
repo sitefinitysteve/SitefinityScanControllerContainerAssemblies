@@ -7,6 +7,9 @@
     <authors>Steve McNiven-Scott (sitefinitysteve)</authors>
     <owners>Steve McNiven-Scott (sitefinitysteve)</owners>
     <license type="expression">MIT</license>
+    <!-- Must be DECLARED here, not just included in <files>, or nuget.org renders
+         nothing on the package page and warns "Readme missing" on push. -->
+    <readme>README.md</readme>
     <projectUrl>https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies</projectUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>
