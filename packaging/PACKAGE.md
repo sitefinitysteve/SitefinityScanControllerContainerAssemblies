@@ -5,27 +5,47 @@ single self-contained native executable. Byte-identical output, **99% faster**.
 
 No PowerShell. No .NET runtime dependency. Nothing to install on the build agent.
 
-## What happens when you install it
+## Install
 
-An MSBuild targets file is imported automatically and overrides Feather's
-`ScanControllerContainerAssemblies` target. Nothing is copied into your project and no
-vendor package is patched.
+```
+Install-Package SitefinityAssemblyScanner
+```
 
-If the import ordering ever ends up wrong, Feather's original target wins and the build
-still produces correct output — just at the original speed. The failure mode is safe.
+**That's it. Build your project. You're done.**
 
-## Why it is faster
+There is nothing to configure. The package adds the executable and points Sitefinity's
+build step at it instead of the PowerShell script.
+
+`ScanControllerContainerAssemblies.ps1` stays exactly where it is, untouched — it just
+isn't the thing being run any more. You don't need to edit your `.csproj` either.
+
+### Did it work?
+
+Build and look for this line in the output:
+
+```
+SitefinitySteveScanControllerAssemblies: 312 dlls, 26 containers, 41 ms
+```
+
+If it's there, the executable ran and the PowerShell script did not.
+
+If it's missing and the build still stalls for ~5 seconds after compiling, check that the
+`SitefinityAssemblyScanner` import at the bottom of your `.csproj` comes **after** the
+`Telerik.Sitefinity.Feather` one. If it doesn't, move it last and rebuild. Nothing breaks
+when the order is wrong — you just get the original slow scan.
+
+## Why it's faster
 
 The stock script calls `Assembly.LoadFrom` on every DLL in `bin` to read two
-assembly-level attributes, fully loading each assembly into a CLR to do it. This reads
-the ECMA-335 metadata directly and never loads an assembly.
+assembly-level attributes, fully loading each assembly into a CLR to do it. This reads the
+ECMA-335 metadata directly and never loads an assembly.
 
-Measured on a real 269-DLL Sitefinity site: ~5,000 ms → ~40 ms — **99.2% faster,
-about 125x**, saving roughly 5 seconds on every single build.
+Measured on a real 269-DLL Sitefinity site: ~5,000 ms → ~40 ms — **99.2% faster, about
+125x**, saving roughly 5 seconds on every single build.
 
 ## Options
 
-Set these in your `.csproj` if you need to:
+Only if you need them:
 
 | Property | Default | Purpose |
 |---|---|---|

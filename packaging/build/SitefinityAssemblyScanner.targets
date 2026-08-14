@@ -74,8 +74,20 @@
           StandardOutputImportance="high"
           StandardErrorImportance="high" />
 
-    <Warning Condition="!Exists('$(SitefinitySteveScanExe)')"
-             Text="SitefinitySteveScanControllerAssemblies.exe not found at '$(SitefinitySteveScanExe)'. The controller-container JSON was not regenerated; Sitefinity will fall back to scanning at startup. If this persists, restore NuGet packages. See https://www.sitefinitysteve.com/" />
+    <!-- Executable missing (partial checkout, packages not restored, wrong platform).
+         Rather than skip the scan, fall back to Feather's own PowerShell script so a
+         build never ships without the JSON. $(ScanControllerContainerAssembliesScript)
+         is defined by Feather's targets, which this file is imported after. -->
+    <Warning Condition="!Exists('$(SitefinitySteveScanExe)') AND Exists('$(ScanControllerContainerAssembliesScript)')"
+             Text="SitefinitySteveScanControllerAssemblies.exe not found at '$(SitefinitySteveScanExe)' - falling back to Sitefinity's PowerShell scan for this build. Restore NuGet packages to get the fast scan back. See https://www.sitefinitysteve.com/" />
+
+    <Exec Command="powershell.exe -NonInteractive -ExecutionPolicy Unrestricted -command &quot;. '$(ScanControllerContainerAssembliesScript)' -binariesDirectory '$(SitefinitySteveScanBinDir)'&quot;"
+          Condition="!Exists('$(SitefinitySteveScanExe)') AND Exists('$(ScanControllerContainerAssembliesScript)')"
+          ContinueOnError="WarnAndContinue" />
+
+    <!-- Neither available: say so loudly rather than silently producing nothing. -->
+    <Warning Condition="!Exists('$(SitefinitySteveScanExe)') AND !Exists('$(ScanControllerContainerAssembliesScript)')"
+             Text="Neither SitefinitySteveScanControllerAssemblies.exe ('$(SitefinitySteveScanExe)') nor Sitefinity's fallback script was found. The controller-container JSON was not regenerated; Sitefinity will scan at startup instead. Restore NuGet packages. See https://www.sitefinitysteve.com/" />
   </Target>
 
 </Project>

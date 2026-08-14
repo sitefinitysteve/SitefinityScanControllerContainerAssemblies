@@ -4,18 +4,114 @@
 
 # SitefinitySteveScanControllerAssemblies
 
-A drop-in replacement for Sitefinity Feather's `ScanControllerContainerAssemblies.ps1`
-build step. Byte-identical output, **99% faster** (roughly 125x).
-
-One self-contained native executable. No PowerShell, no .NET runtime, nothing to install
-on the build agent.
+**Makes every Sitefinity build about 5 seconds faster.**
 
 By **Steve McNiven-Scott** — [sitefinitysteve.com](https://www.sitefinitysteve.com/)
 
-## What is ScanControllerContainerAssemblies.ps1?
+## Overview
 
-It's a build step that ships inside the **Telerik.Sitefinity.Feather** NuGet package, at
-`tools\ScanControllerContainerAssemblies.ps1`.
+Every time you build a Sitefinity site, Feather spends around 5 seconds working out which
+assemblies contain MVC widgets. It does this by loading every single DLL in `bin` into a
+CLR — hundreds of assemblies, several hundred megabytes — to read two attributes.
+
+This replaces that step with a native executable that reads the same information straight
+out of the assembly metadata, without loading anything.
+
+| | Time |
+|---|---|
+| Sitefinity's built-in scan | ~5,000 ms |
+| This | **~40 ms** |
+| | **99.2% faster — about 125×** |
+
+The output is **byte-identical**, so nothing downstream can tell the difference. Install
+it and your builds are just faster.
+
+- One self-contained executable, ~360 KB
+- No PowerShell, no .NET runtime, nothing to install on build agents
+- Zero configuration
+
+## Installation
+
+```
+Install-Package SitefinityAssemblyScanner
+```
+
+**That's it. Build your project. You're done.**
+
+There is nothing to configure. The package adds the executable and points Sitefinity's
+build step at it instead of the PowerShell script.
+
+`ScanControllerContainerAssemblies.ps1` stays exactly where it is, untouched — it just
+isn't the thing being run any more.
+
+### Do I need to add anything to my .csproj?
+
+**No.** Nothing. The package ships an MSBuild targets file, NuGet imports it into your
+project automatically, and that file does all the wiring for you.
+
+If you've come across a manual snippet that defines a `ScanControllerContainerAssemblies`
+target — **that is what this package does for you.** You don't need to paste it in.
+
+<details>
+<summary><b>Manual setup</b> — only if you can't use the NuGet package</summary>
+
+<br>
+
+Some people vendor the exe into their repo instead of installing the package. If that's
+you, drop `SitefinitySteveScanControllerAssemblies.exe` into your site's `Build\` folder
+and add this to your `.csproj`:
+
+```xml
+<!-- Replaces the ScanControllerContainerAssemblies target from Telerik.Sitefinity.Feather.targets,
+     which CLR-loads every assembly in bin on every build just to read two attributes.
+     ORDER IS LOAD-BEARING: this must sit BELOW that Import - MSBuild keeps the LAST
+     definition of a target name. -->
+<PropertyGroup>
+  <ScanControllerContainerAssembliesExe>$(MsBuildProjectDirectory)\Build\SitefinitySteveScanControllerAssemblies.exe</ScanControllerContainerAssembliesExe>
+</PropertyGroup>
+
+<Target Name="ScanControllerContainerAssemblies" AfterTargets="AfterBuild">
+  <Exec Command="&quot;$(ScanControllerContainerAssembliesExe)&quot; &quot;$(MsBuildProjectDirectory)\bin&quot;"
+        Condition="Exists('$(ScanControllerContainerAssembliesExe)')" />
+
+  <!-- Exe absent (partial checkout): fall back to the vendor script so a build never
+       ships without the JSON. -->
+  <Exec Command="powershell.exe -NonInteractive -ExecutionPolicy Unrestricted -command &quot;. '$(ScanControllerContainerAssembliesScript)' -binariesDirectory '$(MsBuildProjectDirectory)\bin'&quot;"
+        Condition="!Exists('$(ScanControllerContainerAssembliesExe)')" />
+</Target>
+```
+
+This must go **after** the `Telerik.Sitefinity.Feather.targets` import, which is normally
+the last line before `</Project>`.
+
+The package does exactly this, plus it keeps the exe up to date with the installed
+version, so prefer the package if you can.
+
+</details>
+
+### Did it work?
+
+Build, and look at the Output window (or build log) for a line like this:
+
+```
+SitefinitySteveScanControllerAssemblies: 312 dlls, 26 containers, 41 ms
+```
+
+If that line is there, you're done.
+
+If it's **not** there and the build still stalls for ~5 seconds after compiling, the old
+script ran — see [Troubleshooting](#troubleshooting).
+
+### Uninstalling
+
+```
+Uninstall-Package SitefinityAssemblyScanner
+```
+
+Sitefinity's original scan is live again immediately. There is no leftover state to clean
+up and nothing to undo.
+
+## What this fixes
 
 Feather needs to know which assemblies contain MVC widgets. Those assemblies mark
 themselves with one of two assembly-level attributes:
@@ -23,116 +119,71 @@ themselves with one of two assembly-level attributes:
 - `ControllerContainerAttribute`
 - `ResourcePackageAttribute`
 
-Finding them by scanning everything at application startup would be slow, so Feather
-works it out at **build** time instead and caches the answer in
-`bin\ControllerContainerAsembliesLocation.json`. Sitefinity reads that list on startup to
-know which assemblies to search for controllers.
+Working that out at application startup would be slow, so Feather does it at **build**
+time and caches the answer in `bin\ControllerContainerAsembliesLocation.json`. Sitefinity
+reads that list on startup to know which assemblies to search for controllers.
 
-The package's `build\Telerik.Sitefinity.Feather.targets` runs the script after every
-build. It prefers a copy at `<YourProject>\Build\ScanControllerContainerAssemblies.ps1`
-if one exists, falling back to its own packaged copy — which is why plenty of Sitefinity
-sites have a copy of this script checked in.
-
-The cache is an optimisation, not a requirement: if the JSON is missing, Feather falls
-back to scanning at startup. That's why an over-inclusive list is cheap and a
-*under*-inclusive one is dangerous — see [Correctness](#correctness).
-
-## Why it's slow
-
-The script answers that question by calling `Assembly.LoadFrom` on **every DLL in `bin`**
-— fully loading each assembly into a CLR, resolving its dependencies and JIT-ing along
-the way, to read something that lives in a few hundred bytes of metadata. On a typical
-site that's 250–350 assemblies and several hundred MB.
+The build step that produces it is `ScanControllerContainerAssemblies.ps1`, shipped inside
+the **Telerik.Sitefinity.Feather** NuGet package. It answers the question by calling
+`Assembly.LoadFrom` on **every DLL in `bin`** — fully loading each assembly into a CLR,
+resolving its dependencies and JIT-ing along the way — to read something that lives in a
+few hundred bytes of metadata. On a typical site that's 250–350 assemblies.
 
 This tool reads that metadata directly and never loads an assembly.
 
-## The numbers
+### Is the output really identical?
 
-Measured on a production Sitefinity bin folder, 269 DLLs, 311 MB:
-
-| | Time |
-|---|---|
-| Stock `ScanControllerContainerAssemblies.ps1` | ~5,000 ms |
-| This tool | **~40 ms** |
-| **Improvement** | **99.2% faster — about 125× — saving ~4.96 s per build** |
-
-If you build 20 times a day that is around **100 seconds a day**, or roughly **7 hours a
-year**, per developer.
-
-Both with the bin folder already in the OS file cache, which is the real build case —
-MSBuild wrote those assemblies seconds earlier, so they're still in RAM. Scanning a
-folder untouched since boot costs ~2.5 s on the first run only, and that's disk I/O, not
-scanner work. The PowerShell version pays that too, worse, since `LoadFrom` reads whole
-assemblies while this reads only each file's metadata region.
-
-## Correctness
-
-Verified byte-identical against three production Sitefinity sites, and cross-checked
+Yes. Verified byte-identical against three production Sitefinity sites, and cross-checked
 against Microsoft's own `System.Reflection.Metadata`:
 
 | Corpus | Result |
 |---|---|
-| Site A, 269 DLLs | byte-identical to the stock script's JSON |
-| Site B, 335 DLLs | byte-identical to the stock script's JSON |
+| Site A, 269 DLLs | byte-identical to the built-in scan's JSON |
+| Site B, 335 DLLs | byte-identical to the built-in scan's JSON |
 | Site C, 313 DLLs | identical set of containers |
 | `System.Reflection.Metadata` | identical across 327 DLLs |
 
 **The fail-safe rule is preserved:** a missing entry makes a widget silently disappear,
-while an extra entry only costs a little startup time. So anything genuinely unreadable
-is *included*, never skipped.
+while an extra entry only costs a little startup time. So anything genuinely unreadable is
+*included*, never skipped.
 
 Reading metadata shrinks "unreadable" to almost nothing. `LoadFrom` can't tell *"has no
-such attribute"* from *"couldn't resolve dependencies"*, which is why the stock script
-includes everything that fails to bind. This resolves no dependencies, so a native DLL
-or netmodule is a **definitive** negative rather than a guess. A side benefit: a DLL that
-crashes `LoadFrom` can't break the scan, so no skip-lists are needed.
+such attribute"* from *"couldn't resolve dependencies"*, which is why the built-in script
+includes everything that fails to bind. This resolves no dependencies, so a native DLL or
+netmodule is a **definitive** negative rather than a guess.
 
-## Install
+A side benefit: because assemblies are never loaded, a DLL that crashes or hangs
+`LoadFrom` can't break the scan. Sites running the built-in script sometimes end up
+maintaining a hardcoded skip-list of problem assemblies. No such workaround is needed here.
 
-Via NuGet:
+### Timing caveat
 
-```
-Install-Package SitefinityAssemblyScanner
-```
+Both figures above are with the bin folder already in the OS file cache, which is the real
+build case — MSBuild wrote those assemblies seconds earlier, so they're still in RAM.
+Scanning a folder untouched since boot costs ~2.5 s on the first run only, and that's disk
+I/O rather than scanner work. The PowerShell version pays that too, worse, since
+`LoadFrom` reads whole assemblies while this reads only each file's metadata region.
 
-Or manually — drop the exe in your site's `Build` folder, beside the `.ps1` it replaces.
-With no arguments it scans `..\bin`:
+## Options
 
-```
-YourSite\
-  Build\SitefinitySteveScanControllerAssemblies.exe
-  bin\        <-- scanned, and where the JSON is written
-```
+You shouldn't need any of these, but they're there.
 
-## How it replaces the .ps1
+### MSBuild properties
 
-**The `.ps1` isn't referenced in your csproj.** Your csproj imports the Feather package's
-targets, and *that* file finds the script by convention:
+Set in your `.csproj`:
 
-```xml
-<ScanControllerContainerAssembliesScript>$(MsBuildProjectDirectory)\Build\ScanControllerContainerAssemblies.ps1</ScanControllerContainerAssembliesScript>
+| Property | Default | Purpose |
+|---|---|---|
+| `SitefinitySteveScanEnabled` | `true` | Set `false` to fall back to Feather's PowerShell scan |
+| `SitefinitySteveScanBinDir` | `$(MSBuildProjectDirectory)\bin` | Folder to scan |
+| `SitefinitySteveScanExe` | package `tools\` folder | Path to the executable |
+| `SitefinitySteveScanCopyToBuildFolder` | `true` | Copy the exe into your `Build\` folder |
 
-<Target Name="ScanControllerContainerAssemblies" AfterTargets="AfterBuild">
-  <Exec Command="powershell.exe ... '$(ScanControllerContainerAssembliesScript)' ..." />
-</Target>
-```
+### Command line
 
-So there's no path in your project to repoint, and editing the vendor file is pointless —
-NuGet restore overwrites it.
-
-Instead, this package **doesn't touch the `.ps1` at all**. It overrides the MSBuild
-*target* that invokes PowerShell. When two targets share a name the last one evaluated
-wins, and NuGet places package imports after Feather's, so ours replaces theirs. The
-script stays on disk, unused. Uninstall the package and Feather's original target is live
-again, with no leftover state.
-
-If the import ever lands *before* Feather's, Feather wins and you get correct output at
-the original speed — a safe failure. Both orderings are tested in CI. The build log shows
-which one ran.
-
-To opt out without uninstalling: `<SitefinitySteveScanEnabled>false</SitefinitySteveScanEnabled>`.
-
-## Usage
+The executable also runs standalone. With no arguments it scans the `bin` folder beside
+its own parent directory, which is how it behaves when sitting in your site's `Build\`
+folder:
 
 ```
 SitefinitySteveScanControllerAssemblies [binariesDirectory] [OPTIONS]
@@ -148,24 +199,53 @@ SitefinitySteveScanControllerAssemblies [binariesDirectory] [OPTIONS]
 `--list` is what to reach for when a widget goes missing — it shows every assembly-level
 attribute on every DLL, so you can see exactly why something matched or didn't.
 
-## Building and contributing
+## Other notes
 
-Needs Rust via [rustup](https://rustup.rs), zero external crates:
+### Troubleshooting
 
-```bash
-cargo build --release
-cargo test --release
+**The summary line doesn't appear and builds are still slow.**
+
+This is almost always import ordering. Open your `.csproj` and look at the very bottom.
+You'll see a line for each package that contributes build targets:
+
+```xml
+<Import Project="packages\Telerik.Sitefinity.Feather.15.4.8631\build\Telerik.Sitefinity.Feather.targets" ... />
+<Import Project="packages\SitefinityAssemblyScanner.1.0.0\build\SitefinityAssemblyScanner.targets" ... />
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the linker gotchas on Windows (they trip most
-people up), how the tests work, a code map, and the invariants that must not be broken.
+**Ours must come after Feather's.** If it doesn't, move that line so it's last and
+rebuild. This can happen if you reinstall or upgrade the Feather package after installing
+this one, because NuGet re-adds Feather's import at the end.
 
-## Publishing
+Nothing breaks when the order is wrong — Feather's original scan runs and produces correct
+output, just at the original speed.
 
-See [NUGET_PUBLISHING.md](NUGET_PUBLISHING.md) — this repo uses NuGet **Trusted Publishing**
-(OIDC), so there is no API key to create or store.
+**A widget went missing.** Run the exe with `--list` against your `bin` folder to see
+every assembly-level attribute on every DLL, and why an assembly was or wasn't matched.
 
-## Why is `Assemblies` misspelled in the JSON output?
+### How it works
+
+*You don't need any of this to use the package.*
+
+Sitefinity's `.ps1` isn't referenced in your csproj at all. Your csproj imports the Feather
+package's targets, and *that* file locates the script by convention and runs it:
+
+```xml
+<Target Name="ScanControllerContainerAssemblies" AfterTargets="AfterBuild">
+  <Exec Command="powershell.exe ... ScanControllerContainerAssemblies.ps1 ..." />
+</Target>
+```
+
+So there's no path in your project to repoint, and editing the vendor file is pointless —
+NuGet restore overwrites it.
+
+This package instead defines a target with the **same name**. In MSBuild, when two targets
+share a name, the last one evaluated wins. NuGet places package imports at the end of the
+csproj, after Feather's, so ours replaces theirs and the PowerShell call never happens.
+
+Both import orderings are covered by tests in CI.
+
+### Why is `Assemblies` misspelled in the JSON output?
 
 Because Telerik misspelled it, and it's now part of the contract. The output file is:
 
@@ -185,9 +265,47 @@ Same reasoning for the file's contents: four-space indent, CRLF, no BOM. That's 
 PowerShell's `ConvertTo-Json | Set-Content` produced, so anything else turns every build
 into a spurious diff.
 
-## Who made this
+### Building from source
+
+Needs Rust via [rustup](https://rustup.rs), zero external crates:
+
+```bash
+cargo build --release
+cargo test --release
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the linker gotchas on Windows (they trip most
+people up), how the tests work, a code map, and the invariants that must not be broken.
+
+Publishing is documented in [NUGET_PUBLISHING.md](NUGET_PUBLISHING.md) — this repo uses
+NuGet **Trusted Publishing** (OIDC), so there is no API key to create or store.
+
+### Also worth a look: Sitefinity MCP Server
+
+**[SitefinityCommunity.Mcp](https://github.com/sitefinitysteve/SitefinityCommunity.Mcp)** — a
+Model Context Protocol server for Sitefinity CMS, so Claude Code and other AI agents can
+work with your site directly.
+
+It exposes 40+ tools across:
+
+- **Logs & diagnostics** — read error and trace logs, regex-search across them, grab the last error
+- **Site info** — Sitefinity version, .NET version, project metadata, multisite config
+- **Pages & content** — list routes, inspect a page's widgets and their property values, browse templates and taxonomies
+- **Modules** — installed modules and Module Builder dynamic types with field definitions
+- **APIs** — ServiceStack REST routes and OData entity sets
+- **Forms** — forms, field definitions and entries, with sensitive data redacted
+- **Permissions & audit** — effective role permissions, and reverse lookups for where a resource is used
+- **Maintenance** — clear caches, recycle the app (gated write operations)
+
+If you've watched Laravel or Rails developers get AI tooling that actually understands
+their framework and wondered where Sitefinity's was — that's the project.
+
+### Who made this
 
 **Steve McNiven-Scott** — **[sitefinitysteve.com](https://www.sitefinitysteve.com/)**
+
+Found a bug, or a site where the output doesn't match?
+[Open an issue](https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies/issues).
 
 If this saved you some build time:
 
@@ -195,9 +313,6 @@ If this saved you some build time:
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="60" width="217">
 </a>
 
-Found a bug or have a site where the output doesn't match?
-[Open an issue](https://github.com/sitefinitysteve/SitefinityScanControllerContainerAssemblies/issues).
-
-## Licence
+### Licence
 
 MIT
