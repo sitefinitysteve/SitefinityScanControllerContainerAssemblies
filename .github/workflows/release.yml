@@ -1,40 +1,61 @@
 name: Release
 
-# Fires only on a version tag. NuGet pushes are PERMANENT - a version can be
-# unlisted but never deleted or overwritten - so this must never run on every
-# push to main.
+# Two ways in:
 #
-#   git tag v0.1.0
-#   git push origin v0.1.0
+#   1. Push a version tag -> builds, tests, packs, PUBLISHES to nuget.org.
+#          git tag v0.1.0 && git push origin v0.1.0
+#
+#   2. Run manually from the Actions tab -> same thing but stops short of the
+#      push, so you can rehearse Trusted Publishing without burning a version.
+#      NuGet versions are PERMANENT: they can be unlisted, never deleted or
+#      overwritten, so rehearse first.
+#
+# The dry run has to live in THIS file rather than a separate test workflow,
+# because the nuget.org Trusted Publishing policy is pinned to the workflow
+# filename. A different file would fail the policy match and prove nothing.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Rehearse only - do everything except publish"
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
+  contents: write   # create the GitHub release
+  id-token: write   # issue the OIDC token Trusted Publishing exchanges for a key
 
 jobs:
   release:
     runs-on: windows-latest
-    # Add required reviewers to this environment in repo Settings -> Environments
-    # if you want a human approval gate before anything reaches nuget.org.
+    # Must match the Environment field of the nuget.org Trusted Publishing policy
+    # if you set one there. Add required reviewers to this environment in repo
+    # Settings -> Environments for a human approval gate before publishing.
     environment: nuget-publish
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version from tag
+      - name: Resolve version
         id: ver
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          echo "tag=$VERSION cargo=$CARGO_VERSION"
-          if [ "$VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::Tag v$VERSION does not match Cargo.toml version $CARGO_VERSION"
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "tag=$VERSION cargo=$CARGO_VERSION"
+            if [ "$VERSION" != "$CARGO_VERSION" ]; then
+              echo "::error::Tag v$VERSION does not match Cargo.toml version $CARGO_VERSION"
+              exit 1
+            fi
+          else
+            # Manual run: no tag to read, so take the version from Cargo.toml.
+            VERSION="$CARGO_VERSION"
+            echo "manual run, version from Cargo.toml: $VERSION"
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --no-self-update
@@ -66,26 +87,71 @@ jobs:
           nuget pack packaging/SitefinityAssemblyScanner.nuspec \
             -Version "${{ steps.ver.outputs.version }}" \
             -OutputDirectory artifacts
-          ls artifacts
+          ls -la artifacts
 
-      - name: Push to nuget.org
+      # Trusted Publishing: exchange this run's OIDC token for a temporary
+      # nuget.org API key. No long-lived secret is stored anywhere. The key is
+      # valid for one hour and single-use, so request it immediately before the
+      # push rather than earlier in the job.
+      #
+      # This step runs even on a dry run - it is the whole point of rehearsing.
+      # If the policy, NUGET_USER, workflow filename or environment are wrong,
+      # this is where it fails.
+      - name: NuGet login (OIDC)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          # nuget.org profile name, NOT an email address.
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Confirm Trusted Publishing worked
         shell: bash
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::NUGET_API_KEY secret is not set. Add it in repo Settings -> Secrets and variables -> Actions."
+          if [ -z "${{ steps.login.outputs.NUGET_API_KEY }}" ]; then
+            echo "::error::No temporary API key was issued - check the trusted publishing policy"
             exit 1
           fi
-          dotnet nuget push artifacts/*.nupkg \
-            --api-key "$NUGET_API_KEY" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+          echo "Trusted Publishing OK: nuget.org issued a temporary API key."
+
+      - name: Dry run summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        shell: bash
+        run: |
+          {
+            echo "### Dry run - nothing was published"
+            echo ""
+            echo "Everything up to the push succeeded:"
+            echo "- built \`x86_64-pc-windows-msvc\`"
+            echo "- full test suite passed"
+            echo "- packed version \`${{ steps.ver.outputs.version }}\`"
+            echo "- **Trusted Publishing exchanged an OIDC token for a nuget.org key**"
+            echo ""
+            echo "To publish for real, push a matching tag:"
+            echo '```'
+            echo "git tag v${{ steps.ver.outputs.version }}"
+            echo "git push origin v${{ steps.ver.outputs.version }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push to nuget.org
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: >
+          dotnet nuget push artifacts/*.nupkg
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
 
       - name: Create GitHub release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/x86_64-pc-windows-msvc/release/SitefinitySteveScanControllerAssemblies.exe
             artifacts/*.nupkg
           generate_release_notes: true
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ steps.ver.outputs.version }}
+          path: artifacts/*.nupkg

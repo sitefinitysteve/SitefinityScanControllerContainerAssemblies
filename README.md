@@ -162,7 +162,8 @@ people up), how the tests work, a code map, and the invariants that must not be 
 
 ## Publishing
 
-See [PUBLISHING.md](PUBLISHING.md).
+See [NUGET_PUBLISHING.md](NUGET_PUBLISHING.md) — this repo uses NuGet **Trusted Publishing**
+(OIDC), so there is no API key to create or store.
 
 ## Why is `Assemblies` misspelled in the JSON output?
 
